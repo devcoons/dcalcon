@@ -1,0 +1,48 @@
+{$DCALCON_DOMAIN:localhost} {
+	encode gzip zstd
+
+	# Split services, one public origin. Required so DAVx5 / GNOME can
+	# discover CalDAV + CardDAV from a single well-known URL.
+
+	handle /healthz {
+		reverse_proxy api:8080
+	}
+	handle /readyz {
+		reverse_proxy api:8080
+	}
+	handle /version {
+		reverse_proxy api:8080
+	}
+
+	handle /api* {
+		reverse_proxy api:8080
+	}
+
+	handle /.well-known/caldav {
+		reverse_proxy caldav:8080
+	}
+	handle /.well-known/carddav {
+		reverse_proxy carddav:8080
+	}
+
+	handle /dav/calendars* {
+		reverse_proxy caldav:8080
+	}
+	handle /dav/addressbooks* {
+		reverse_proxy carddav:8080
+	}
+
+	# Principals, inbox/outbox, and leftover /dav paths stay on the API
+	# process (CombinedHandler). Collection URLs above go to the DAV services.
+	handle /dav* {
+		reverse_proxy api:8080
+	}
+
+	handle /webcal* {
+		reverse_proxy api:8080
+	}
+
+	handle {
+		reverse_proxy web:3000
+	}
+}

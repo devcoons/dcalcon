@@ -1,0 +1,37 @@
+# TLS origin. Point DCALCON_DOMAIN at a hostname that can complete
+# ACME (ports 80 and 443 reachable). Use with:
+#   volumes: - ./src/svc/caddy/Caddyfile.tls:/etc/caddy/Caddyfile:ro
+# and publish 80 + 443. Set DCALCON_PUBLIC_URL=https://$DCALCON_DOMAIN
+# and DCALCON_SESSION_SECURE=true (automatic when the public URL is https).
+
+{$DCALCON_DOMAIN} {
+	encode gzip zstd
+
+	handle /healthz {
+		reverse_proxy core:8080
+	}
+	handle /readyz {
+		reverse_proxy core:8080
+	}
+	handle /version {
+		reverse_proxy core:8080
+	}
+	handle /api* {
+		reverse_proxy core:8080
+	}
+	handle /.well-known/caldav {
+		reverse_proxy core:8080
+	}
+	handle /.well-known/carddav {
+		reverse_proxy core:8080
+	}
+	handle /dav* {
+		reverse_proxy core:8080
+	}
+	handle /webcal* {
+		reverse_proxy core:8080
+	}
+	handle {
+		reverse_proxy web:3000
+	}
+}

@@ -1,0 +1,38 @@
+# Binaries and build
+/bin/
+src/svc/bin/
+/dist/
+*.exe
+*.test
+*.out
+coverage.out
+
+# Data
+/data/
+src/svc/data/
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+
+# Node / Next.js
+src/web/node_modules/
+src/web/.next/
+src/web/out/
+src/web/.turbo/
+src/web/next-env.d.ts
+
+# Env and secrets
+.env
+.env.local
+.env.*.local
+*.pem
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+*.swp
+
+# Go
+vendor/

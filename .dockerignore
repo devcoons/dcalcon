@@ -1,0 +1,17 @@
+.git
+.gitignore
+data
+*.db
+*.db-wal
+*.db-shm
+src/web/node_modules
+src/web/.next
+src/svc/bin
+src/svc/data
+bin
+dist
+doc
+**/.env
+**/.env.local
+README.md
+sample-*.docker-compose.yaml

@@ -1,0 +1,125 @@
+# Lab / debug only: split processes behind one public origin.
+# Production with SQLite must use sample-all-in-one.docker-compose.yaml
+# (`dcalcon serve`). Do not replica-scale these services.
+#
+# Images include HEALTHCHECK. The proxy waits until API, DAV, and web are up.
+#
+# Each process has its own in-memory rate limiter, and SQLite still allows
+# only one writer. Use this file to inspect routing — not to “scale” API vs DAV.
+#
+#   podman compose -f sample-split.docker-compose.yaml up --build
+#
+# For production TLS, set DCALCON_DOMAIN and mount a Caddyfile that enables
+# automatic certificates (see src/svc/caddy/Caddyfile.split).
+
+services:
+  caldav:
+    build:
+      context: .
+      target: caldav
+    image: dcalcon:caldav
+    command: ["caldav"]
+    environment:
+      DCALCON_HTTP_ADDR: ":8080"
+      DCALCON_SQLITE_PATH: /data/dcalcon.db
+      DCALCON_PUBLIC_URL: ${DCALCON_PUBLIC_URL:-http://localhost}
+      DCALCON_TRUSTED_PROXIES: ${DCALCON_TRUSTED_PROXIES:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
+    volumes:
+      - dcalcon-data:/data
+    restart: unless-stopped
+
+  carddav:
+    build:
+      context: .
+      target: carddav
+    image: dcalcon:carddav
+    command: ["carddav"]
+    environment:
+      DCALCON_HTTP_ADDR: ":8080"
+      DCALCON_SQLITE_PATH: /data/dcalcon.db
+      DCALCON_PUBLIC_URL: ${DCALCON_PUBLIC_URL:-http://localhost}
+      DCALCON_TRUSTED_PROXIES: ${DCALCON_TRUSTED_PROXIES:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
+    volumes:
+      - dcalcon-data:/data
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      target: api
+    image: dcalcon:api
+    command: ["api"]
+    environment:
+      DCALCON_HTTP_ADDR: ":8080"
+      DCALCON_SQLITE_PATH: /data/dcalcon.db
+      DCALCON_PUBLIC_URL: ${DCALCON_PUBLIC_URL:-http://localhost}
+      DCALCON_ADMIN_USERNAME: ${DCALCON_ADMIN_USERNAME:-admin}
+      DCALCON_ADMIN_PASSWORD: ${DCALCON_ADMIN_PASSWORD:?Set DCALCON_ADMIN_PASSWORD in .env (not changeme)}
+      DCALCON_SESSION_SECURE: ${DCALCON_SESSION_SECURE:-false}
+      DCALCON_BACKUP_DIR: ${DCALCON_BACKUP_DIR:-/data/backups}
+      DCALCON_BACKUP_HOOK: ${DCALCON_BACKUP_HOOK:-}
+      DCALCON_CORS_ORIGINS: ${DCALCON_CORS_ORIGINS:-}
+      DCALCON_TOKEN_KEY: ${DCALCON_TOKEN_KEY:-}
+      DCALCON_TRUSTED_PROXIES: ${DCALCON_TRUSTED_PROXIES:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
+      DCALCON_SMTP_HOST: ${DCALCON_SMTP_HOST:-}
+      DCALCON_SMTP_PORT: ${DCALCON_SMTP_PORT:-587}
+      DCALCON_SMTP_USERNAME: ${DCALCON_SMTP_USERNAME:-}
+      DCALCON_SMTP_PASSWORD: ${DCALCON_SMTP_PASSWORD:-}
+      DCALCON_SMTP_FROM: ${DCALCON_SMTP_FROM:-}
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
+      MICROSOFT_OAUTH_CLIENT_ID: ${MICROSOFT_OAUTH_CLIENT_ID:-}
+      MICROSOFT_OAUTH_CLIENT_SECRET: ${MICROSOFT_OAUTH_CLIENT_SECRET:-}
+      MICROSOFT_OAUTH_TENANT: ${MICROSOFT_OAUTH_TENANT:-}
+    volumes:
+      - dcalcon-data:/data
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      target: worker
+    image: dcalcon:worker
+    command: ["worker"]
+    environment:
+      DCALCON_HTTP_ADDR: ":8080"
+      DCALCON_SQLITE_PATH: /data/dcalcon.db
+      DCALCON_BACKUP_DIR: ${DCALCON_BACKUP_DIR:-/data/backups}
+      DCALCON_BACKUP_HOOK: ${DCALCON_BACKUP_HOOK:-}
+    volumes:
+      - dcalcon-data:/data
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      target: web
+    image: dcalcon:web
+    environment:
+      API_URL: http://api:8080
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  proxy:
+    image: caddy:2.10-alpine
+    ports:
+      - "80:80"
+    environment:
+      DCALCON_DOMAIN: ${DCALCON_DOMAIN:-localhost}
+    volumes:
+      - ./src/svc/caddy/Caddyfile.split:/etc/caddy/Caddyfile:ro
+    depends_on:
+      caldav:
+        condition: service_healthy
+      carddav:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  dcalcon-data:

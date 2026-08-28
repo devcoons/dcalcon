@@ -1,0 +1,28 @@
+:80 {
+	encode gzip
+
+	handle /healthz {
+		reverse_proxy core:8080
+	}
+	handle /readyz {
+		reverse_proxy core:8080
+	}
+	handle /version {
+		reverse_proxy core:8080
+	}
+	handle /api* {
+		reverse_proxy core:8080
+	}
+	handle /.well-known/* {
+		reverse_proxy core:8080
+	}
+	handle /dav* {
+		reverse_proxy core:8080
+	}
+	handle /webcal* {
+		reverse_proxy core:8080
+	}
+	handle {
+		reverse_proxy web:3000
+	}
+}
