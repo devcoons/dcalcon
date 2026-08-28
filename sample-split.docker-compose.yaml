@@ -5,7 +5,7 @@
 # Images include HEALTHCHECK. The proxy waits until API, DAV, and web are up.
 #
 # Each process has its own in-memory rate limiter, and SQLite still allows
-# only one writer. Use this file to inspect routing — not to “scale” API vs DAV.
+# only one writer. Useful for inspecting routing, not for scaling API vs DAV.
 #
 #   podman compose -f sample-split.docker-compose.yaml up --build
 #

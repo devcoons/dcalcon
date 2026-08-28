@@ -1,117 +1,71 @@
 # Architecture
 
-## Goals
-
-- One host that DAVx⁵ / GNOME Online Accounts can add **once** and get calendars **and** contacts.
-- iCalendar and vCard remain the canonical payload (what clients PUT).
-- The web UI is a first-class editor of the same objects, not a second database.
-- Extra features (Important Dates, invites, OAuth) run as jobs against the **same domain layer** as DAV.
-
-## Target shape
-
-This is the diagram we should grow into. It matches the usual “reverse proxy + protocol adapters + domain + SQLite + worker” split, with two corrections:
-
-1. The **worker is a client of the domain**, not a second writer glued to the database.
-2. Next.js and the Go REST API are **two processes** behind the proxy, even if they are one “web” product.
+One origin. DAVx⁵ (or GNOME Online Accounts) is added once and sees calendars and contacts. Stored objects are iCalendar and vCard — what clients PUT. The dashboard edits those same rows; it does not keep a parallel event store.
 
 ```
-                         Internet / LAN
-                               |
-                        +---------------+
-                        | Reverse proxy |
-                        | TLS + routing |
-                        | one public origin
-                        +-------+-------+
-                                |
-     +----------+----------+----+-----+----------+
-     |          |          |          |          |
-+----v---+ +----v----+ +---v--+ +-----v----+ +---v----+
-| CalDAV | | CardDAV | | Web  | | API/REST | | Worker |
-| Go     | | Go      | | Next | | Go       | | Go     |
-+----+---+ +----+----+ +--+---+ +-----+----+ +---+----+
-     |          |         |           |          |
-     +----------+---------+-----------+----------+
-                                |
-                     +----------v-----------+
-                     | Shared domain        |
-                     | Users / ACL          |
-                     | Calendars / Contacts |
-                     | Scheduling (iTIP)    |
-                     | Notification policy  |
-                     | Integration ports    |
-                     +----------+-----------+
-                                |
-                          +-----v-----+
-                          |  SQLite   |
-                          | WAL mode  |
-                          +-----------+
+                    LAN / internet
+                          |
+                    reverse proxy
+                    (TLS, one host)
+                          |
+        +--------+--------+--------+--------+
+        |        |        |        |        |
+     CalDAV   CardDAV    Next    REST    worker
+        |        |        |        |        |
+        +--------+--------+--------+--------+
+                          |
+                       SQLite
+                       (WAL)
 ```
 
-**All-in-one (`dcalcon serve`)** — one process: CalDAV + CardDAV + REST + worker goroutine. This is the SQLite-safe **production** default.
+Production is `dcalcon serve`: CalDAV, CardDAV, REST, and the worker loop in one process. That is the SQLite-safe default.
 
-**Split** — same binary, different `CMD`. Shared volume, **one node**, no replicas. Lab/debug only: rate limits are per-process. Caddy still exposes **one origin**. Clients must not see two hosts for CalDAV vs CardDAV.
+Split compose is the same binary with different `CMD`s, one volume, one machine. Lab use. Each process has its own rate limiter. Clients still see one host — do not publish CalDAV and CardDAV on two names.
 
-Discovery (`/.well-known/*`, `/dav/principals/`) is not a fourth product. It is shared routing on that origin so one DAVx⁵ account finds both home-sets.
+`/.well-known/caldav` and `carddav` plus `/dav/principals/` live on that origin so one account finds both home-sets.
 
-## Domain vs adapters
-
-| Layer | Owns | Must not own |
-|---|---|---|
-| CalDAV / CardDAV | RFC 4791 / 6352 HTTP, REPORT XML, ETags | Password hashing policy, invite business rules |
-| API | JSON for the dashboard | A second event model that DAV cannot round-trip |
-| Web (Next) | UI | Direct SQLite |
-| Worker | Important Dates generation, iMIP send, OAuth sync ticks | Ad-hoc SQL that bypasses ACL |
-| Domain | Users, ACL, calendars, contacts, iTIP scheduling, notification prefs | HTTP, XML, OAuth HTTP details |
-| Store | SQLite, WAL, migrations | “What is a birthday calendar” |
-
-Canonical bytes: **raw iCalendar / vCard** plus extracted columns for queries. File attachments for events and tasks are **SQLite blobs** (`calendar_attachments`); ICS holds `ATTACH` URIs, not the file bytes. DAV PUT overwrites the document. The API generates iCalendar/vCard when the user edits in the dashboard. JSCalendar (RFC 8984) is a **mapping for JSON**, not a second store.
-
-## Target Go layout
-
-Keep the unified binary. Grow internals toward this (names can land incrementally):
+## Tree
 
 ```
-src/svc/                     Go module (one server binary, several CMDs)
-  cmd/dcalcon/               serve | caldav | carddav | api | worker
-  services/{caldav,carddav,api,worker}/
-  internal/
-    domain/                  users, ACL, calendars, contacts, settings
-    store/                   SQLite adapter (today: internal/storage)
-    auth/
-    ical/                    parse / validate / encode RFC 5545
-    vcard/                   parse / validate / encode RFC 6350 + v3
-    schedule/                iTIP state machine (RFC 5546 → 6638 + 6047)
-    integrations/            Google, Microsoft, SMTP
-  caddy/                     sample reverse-proxy configs
-src/cli/                     Go module (REST client of /api/v1)
-  cmd/dcalcon-cli/           dashboard operations from the terminal
-  internal/{config,client,app}/
-src/web/                     Next.js dashboard
+src/svc/cmd/dcalcon/          serve | caldav | carddav | api | worker
+src/svc/services/             HTTP wrappers for split compose
+src/svc/internal/
+  storage/                    SQLite, migrations, ACL shares
+  caldav/ carddav/ dav/       go-webdav backends + extensions
+  api/                        dashboard REST
+  worker/                     Important Dates, purge
+  schedule/                   local iTIP
+  icsutil/                    parse/build ICS and vCard
+  userbackup/                 Settings zip
+  mail/ providers/ secret/    SMTP, OAuth, sealed blobs
+src/cli/                      REST client (no svc internals)
+src/web/                      Next.js
 ```
 
-`src/svc/cmd/dcalcon` is the only **server** Go entrypoint. Do not split the service into four unrelated binaries with copied domain code. `dcalcon-cli` is a separate client of the dashboard REST API — it must not import `src/svc/internal/*`.
+`dcalcon` is the server entrypoint. Do not fork four copies of the domain into four binaries. `dcalcon-cli` is a client of `/api/v1` only.
+
+Attachments sit in `calendar_attachments` as blobs. ICS carries `ATTACH` URIs, not BASE64. A dashboard edit writes iCalendar/vCard; a DAV PUT overwrites the document. JSCalendar is a JSON mapping for the API, not a second store.
 
 ## Auth
 
-| Client | Method |
+| Who | How |
 |---|---|
-| DAV | HTTP Basic, bcrypt password |
-| Web | `dcalcon_session` cookie (and optional Bearer) |
-| CLI | Login stores `dcalcon_session`; requests send the cookie and `Authorization: Bearer` |
+| DAV | HTTP Basic (account password, or app password; app password required once TOTP is on) |
+| Web | `dcalcon_session` cookie |
+| CLI | same cookie, also `Authorization: Bearer` |
 
-App passwords can be added later without changing collection URLs. Calendar ACL (RFC 3744 subset) is enforced in storage shares; DAV ACL and the dashboard both write that table.
+Calendar ACL is the shares table. Dashboard and the CalDAV ACL subset both write it. Not per-event ACEs, not CS:invite.
 
-## Worker jobs
+## Worker
 
-The worker calls domain use-cases on a timer (and later on a jobs table):
+Timer in-process (or the `worker` subcommand in split compose):
 
-- Important Dates rebuild
-- Alarm materialization into `VALARM` (clients display/notify; we do not run a push-notification platform on day one)
-- Invitation delivery (local inbox; iMIP to external addresses when a mail account is linked)
-- Google / Microsoft **calendar** sync (not started; mail send is in the API, not the worker)
+- rebuild Important Dates
+- expire sessions / OAuth states / reset tokens
+- alarms are `VALARM` on the ICS — clients fire them; there is no push service
 
-Alarms: persist policy in domain, emit standard `VALARM` on the ICS. Do not invent a parallel reminder channel unless DAVx⁵ / GNOME are proven insufficient.
+Invitation mail (iMIP) is sent from the API when someone invites, not from a separate mail daemon.
 
-## Why not two databases
+## Why one database
 
-CalDAV and CardDAV share principals, passwords, and Important Dates (contacts → calendar). Splitting storage would force a distributed transaction for a feature that is the product’s point.
+Principals, passwords, and Important Dates (contacts → calendar) share users. Splitting CalDAV and CardDAV stores would make birthday events a distributed transaction for no gain.

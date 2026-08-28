@@ -1,70 +1,53 @@
-# Standards we target
+# Specs
 
-CalDAV/CardDAV were not replaced by a “v2”. Interoperability is the original RFCs **plus** the extensions clients probe.
+CalDAV did not get a “2.0”. Interop is RFC 4791 / 6352 plus the extras clients actually send. CalConnect’s starter list is still a decent map: https://www.calconnect.org/resources/caldav-and-carddav/
 
-CalConnect starter list: https://www.calconnect.org/resources/caldav-and-carddav/
+Handlers start from `github.com/emersion/go-webdav`. ctag, sync-collection, and scheduling sit on top of that.
 
-## Transport and identity (must)
+## Transport
 
-| Spec | Role |
+| Spec | |
 |---|---|
 | RFC 4918 WebDAV | PROPFIND, PUT, DELETE, MKCOL |
-| RFC 4791 CalDAV `calendar-access` | Calendars, calendar-query / calendar-multiget |
-| RFC 6352 CardDAV | Address books, addressbook-query / addressbook-multiget |
-| RFC 5397 current-user-principal | Fast discovery — **clients will fail without this** |
-| RFC 6764 well-known URIs | `/.well-known/caldav` and `carddav` |
-| RFC 5689 extended MKCOL | Create collections with properties |
-| RFC 3744 ACL | Privilege-set / acl on calendars; ACL method maps to whole-calendar shares. Not CS:invite or per-resource ACE. |
-| RFC 2818 TLS / RFC 7617 Basic | Production transport and DAV login |
+| RFC 4791 CalDAV | calendars, calendar-query / calendar-multiget |
+| RFC 6352 CardDAV | address books, addressbook-query / addressbook-multiget |
+| RFC 5397 current-user-principal | discovery; clients fall over without it |
+| RFC 6764 | `/.well-known/caldav` and `carddav` |
+| RFC 5689 extended MKCOL | create collection with properties |
+| RFC 3744 ACL | privilege-set / acl on calendars; ACL method → whole-calendar shares. Not CS:invite, not per-resource ACE |
+| RFC 2818 / RFC 7617 | TLS and Basic |
 
-## Payload (must)
+## Payload
 
-| Spec | Role |
+| Spec | |
 |---|---|
-| RFC 5545 iCalendar | VEVENT / VTODO / VTIMEZONE on the wire |
-| RFC 2426 vCard 3 | CardDAV **MUST** |
-| RFC 6350 vCard 4 | CardDAV **SHOULD**; store without dropping unknown props |
+| RFC 5545 iCalendar | VEVENT / VTODO / VTIMEZONE |
+| RFC 2426 vCard 3 | CardDAV must |
+| RFC 6350 vCard 4 | should; keep unknown props |
 
-## Scheduling (must for invites; phased)
+## Scheduling
 
-| Spec | Role |
+| Spec | |
 |---|---|
-| RFC 5546 iTIP | Semantics: REQUEST / REPLY / CANCEL, ORGANIZER / ATTENDEE |
-| RFC 6638 CalDAV scheduling | How native calendar apps transport iTIP (inbox/outbox) |
-| RFC 6047 iMIP | Same iTIP methods bound to email for Gmail/Outlook attendees |
+| RFC 5546 iTIP | REQUEST / REPLY / CANCEL, ORGANIZER / ATTENDEE |
+| RFC 6638 | inbox/outbox on CalDAV |
+| RFC 6047 iMIP | same methods over email |
 
-Domain `schedule` should speak **iTIP**. CalDAV is one transport. Email is another. REST accept/decline is a third view of the same state.
+iTIP is the state. CalDAV, mail, and REST accept/decline are three views of it.
 
-## Sync performance (should, before calling DAVx⁵ “done”)
+## Sync (needed before calling DAVx⁵ done)
 
-| Spec | Role |
+| Spec | |
 |---|---|
-| RFC 6578 sync-collection | Incremental collection sync |
-| Apple `CS:getctag` | Cheap change detection (not IETF, but expected) |
-| Apple `calendar-color` / `calendar-order` | Display in GNOME / Apple / DAVx⁵ |
-| ETags + If-Match | Lost-update protection (RFC 4791 extra rules) |
+| RFC 6578 sync-collection | incremental |
+| Apple `CS:getctag` | cheap change check (not IETF, still expected) |
+| Apple calendar-color / calendar-order | GNOME / Apple / DAVx⁵ |
+| ETags + If-Match | lost-update (RFC 4791 extra rules) |
 
-## Newer iCalendar (preserve now, feature later)
+## Preserve on the wire, maybe feature later
 
-| Spec | Role |
-|---|---|
-| RFC 7986 | Extra properties (NAME, COLOR, IMAGE, CONFERENCE, …) |
-| RFC 9073 / RFC 9074 | Event publishing, VALARM extensions |
-| RFC 9253 | iCalendar relationships (`RELATED-TO`, CONCEPT, LINK) |
-| RFC 7809 | Time zones by reference (smaller objects; clients still send VTIMEZONE) |
-| RFC 7953 | VAVAILABILITY — richer free/busy, not required for first sync |
+RFC 7986 extra properties, RFC 9073/9074, RFC 9253 RELATED-TO, RFC 7809 TZ by reference, RFC 7953 VAVAILABILITY. Unknown properties should round-trip. Do not drop them in Go structs.
 
-Unknown properties must **round-trip**. Do not strip them in Go structs.
+## Dashboard JSON only
 
-## Web JSON only (must not replace DAV)
-
-| Spec | Role |
-|---|---|
-| RFC 8984 JSCalendar | Dashboard/API mapping from stored iCalendar |
-| RFC 7529 jCal / RFC 7095 jCard | Alternate encodings; optional |
-
-DAV clients PUT iCalendar/vCard. JSCalendar is not a CalDAV payload.
-
-## Library baseline
-
-Handlers start from `github.com/emersion/go-webdav`. Scheduling, ctag, and sync-collection will need work on top of it.
+RFC 8984 JSCalendar is a mapping from stored iCalendar. RFC 7529 jCal / RFC 7095 jCard are optional encodings. DAV clients PUT iCalendar/vCard. JSCalendar is not a CalDAV payload.
